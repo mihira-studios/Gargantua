@@ -32,4 +32,4 @@ To execute the main script or any other entry points defined in your `pyproject.
 
 usage: poetry run gargantua [-h] [--gui] [--source SOURCE] --destination DESTINATION [--project PROJECT] --input_date INPUT_DATE [--data_type DATA_TYPE] [--mov] [--process {0,1}] [--vendor VENDOR] [--hires] [--camera CAMERA] [--take TAKE][--resolution RESOLUTION] [--force] [--proxy FORMAT]
 
-poetry run gargantua --source /Users/cooper/WorkSpace/MIHIRA/test_data --destination /Users/cooper/WorkSpace/MIHIRA/out_data --input_date 20250410
+poetry run gargantua --source <project root path> --destination <out> --input_date <YYYYmmdd>
