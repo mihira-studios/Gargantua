@@ -18,6 +18,7 @@ import pandas as pd
 import csv
 from enum import Enum, unique
 import subprocess
+import concurrent.futures
 
 @unique
 class INGESTIONPROCESS(Enum):
@@ -224,16 +225,16 @@ class VFXFileProcessor():
 			
 			self.process = self.args.process
 
-		cwd =  os.getcwd()
-		reader_no_header = CSVReader( os.path.join(cwd,"data", "shot_folders_to_be_renamed.csv"))
-		reader_no_header.read_csv(skip_header=False)
+		#cwd =  os.getcwd()
+		#reader_no_header = CSVReader( os.path.join(cwd,"data", "shot_folders_to_be_renamed.csv"))
+		#reader_no_header.read_csv(skip_header=False)
 
 		# Create mapping where the first column is the key (no header)
-		first_column_mapping_no_header = reader_no_header.create_dictionary_mapping(skip_header=False)
-		print("\nDictionary Mapping (First Column as Key, No Header):")
-		for key, values in first_column_mapping_no_header.items():
-			self.data[key] = values
-			print(f"{key}: {self.data[key]}")
+		#first_column_mapping_no_header = reader_no_header.create_dictionary_mapping(skip_header=False)
+		#print("\nDictionary Mapping (First Column as Key, No Header):")
+		#for key, values in first_column_mapping_no_header.items():
+		#	self.data[key] = values
+	        #	print(f"{key}: {self.data[key]}")
 		
 		if self.process:
 			self.process_to_mvl()
@@ -271,6 +272,7 @@ class VFXFileProcessor():
 			except Exception as e:
 				logging.error(f"Error: An unexpected error occured {e}")
 				sys.exit(1)
+		
 
 	def proces_vendor(self, date_str, vault_path, process):
 		
@@ -285,7 +287,7 @@ class VFXFileProcessor():
 		if vendor:
 			vendor_date_path = os.path.join(vault_path, vendor, date_str)
 			if os.path.isdir(vendor_date_path):
-				logging.info(f"Using path: {vault_path}")
+				print(f"Using path: {vault_path}")
 				self.data["source"] = vendor_date_path
 			else:
 				logging.error(f"Vendor path not found: {vault_path}")
@@ -334,9 +336,11 @@ class VFXFileProcessor():
 		Args:
 		base_path (str): The base path containing the folders to process.
 		"""
-		paths = self.data.get("source")
+		paths = [self.data.get("source")]
+
+		print (f"execute: {paths}")
 		if not isinstance(paths, list):
-			paths = [paths]
+			return 
 		
 		for base_path in paths:
 			if not os.path.exists(base_path):
@@ -357,20 +361,48 @@ class VFXFileProcessor():
 							self.data["shot"] = scene_shot_match.group(1)
 							scene_shot_path = os.path.join(root, folder_name)
 							
-							# Find resolution folders (e.g., 4448x3086) inside scene_shot folders
-							for sub_dir_name in os.listdir(scene_shot_path):
-								sub_dir_path = os.path.join(scene_shot_path, sub_dir_name)
-								if os.path.isdir(sub_dir_path): 
-									resolution_match = re.match(r"\d+x\d+", sub_dir_name)
-									if resolution_match:
-										self.data["resolution"] = resolution_match.group(0)
-										files, sequences = self.get_files_and_sequences(sub_dir_path)
-										self.copy_files_to_structure(files, sequences, self.data.get("destination"))
-									else:
-										logging.error(f"No valid resolution folders found in the path:  {sub_dir_path}")
+							status = self.readCSV(scene_shot_path)
+							if status:
+								# Find resolution folders (e.g., 4448x3086) inside scene_shot folders
+								for sub_dir_name in os.listdir(scene_shot_path):
+									sub_dir_path = os.path.join(scene_shot_path, sub_dir_name)
+									if os.path.isdir(sub_dir_path): 
+										resolution_match = re.match(r"\d+x\d+", sub_dir_name)
+										if resolution_match:
+											self.data["resolution"] = resolution_match.group(0)
+											files, sequences = self.get_files_and_sequences(sub_dir_path)
+											seqeunce_path_pattern  = self.copy_files_to_structure(files, sequences)
+											
+											#print(f"pattern for mov : {seqeunce_path_pattern}")
+											#base_name, ext = os.path.basename(seqeunce_path_pattern).split('.')
+											#self.create_mov_from_exrs(seqeunce_path_pattern, os.path.join(scene_shot_path, f"{base_name}.mov"))
+
 				
 			except Exception as e:
 				logging.error(f"An error occurred: {e}")
+	
+	def readCSV(self, path):
+		from os import listdir
+		files= [f for f in listdir(path) if f.endswith(".csv")]
+		
+		if len(files):
+			reader_no_header = CSVReader(os.path.join(path,files[0]))
+			reader_no_header.read_csv(skip_header=False)
+			# Create mapping where the first column is the key (no header)
+			first_column_mapping_no_header = reader_no_header.create_dictionary_mapping(skip_header=False)
+			for key, values in first_column_mapping_no_header.items():
+				self.data[key] = values
+		else:
+			print(f"No csv file found at {path}!")
+			return False
+		
+		return True
+
+	def copy_file(self, src, dst):
+		os.makedirs(os.path.dirname(dst), exist_ok=True)
+		shutil.copy2(src, dst)
+		print(f"Copied sequence file: {os.path.basename(src)} to {dst}")
+        
 
 	def get_files_and_sequences(self, root_dirs):
 		"""
@@ -554,13 +586,12 @@ class VFXFileProcessor():
 
 		return False
 
-	def copy_files_to_structure(self, files, sequences, destination_asset_dir):
+	def copy_files_to_structure(self, files, sequences):
 		"""Copies the selected files and sequences to the created folder structure."""
-		publish_dirs = destination_asset_dir
-
 		error_msg = None
 
 		m_status = self.check_missing_frames(sequences)
+		mov_pattern = None
 
 		print(f"missing frames: {m_status}")
 		if m_status and self.data.get("force") == False:
@@ -570,6 +601,7 @@ class VFXFileProcessor():
 				try:
 					base_name, extension = os.path.splitext(os.path.basename(file_path))
 					output_path = self.generate_output_path(base_name, 1001, extension.lower())  # 1001 for single files
+					mov_pattern  = self.exr_to_ffmpeg_pattern(outpath=output_path)
 					if output_path:
 						os.makedirs(os.path.dirname(output_path), exist_ok=True)
 						shutil.copy2(file_path, output_path)
@@ -582,27 +614,34 @@ class VFXFileProcessor():
 					# Sort paths based on the last number after splitting by '_'
 					sorted_paths = sorted(seq['paths'], key=lambda path: int(os.path.splitext(os.path.basename(path))[0].split('_')[-1]))
 					frame_counter = 1001
-					for path in sorted_paths:
-						if path is None:
-							logging.error("Warning: Encountered a None path in the sequence.")
-							continue  # Skip to the next iteration
-						try:
-							base_name, extension = os.path.splitext(os.path.basename(path))
-							output_path = self.generate_output_path(base_name, frame_counter, extension)
-							if output_path:
-								os.makedirs(os.path.dirname(output_path), exist_ok=True)
-								shutil.copy2(path, output_path)
-								print(f"Copied sequence file: {os.path.basename(path)} to {output_path}")
-								frame_counter += 1
-						except Exception as e:
-							error_msg = f"Error copying sequence file {os.path.basename(path)}: {e}"
+					with concurrent.futures.ThreadPoolExecutor() as executor:
+						futures = []
+						for path in sorted_paths:
+							if path is None:
+								logging.error("Warning: Encountered a None path in the sequence.")
+								continue
+							try:
+								base_name, extension = os.path.splitext(os.path.basename(path))
+								output_path = self.generate_output_path(base_name, frame_counter, extension)
+								if output_path:
+									futures.append(executor.submit(self.copy_file, path, output_path))
+									frame_counter += 1
+							except Exception as e:
+								error_msg = f"Error copying sequence file {os.path.basename(path)}: {e}"
+						# Optionally, wait for all to finish and handle exceptions
+						for future in concurrent.futures.as_completed(futures):
+							try:
+								future.result()
+							except Exception as exc:
+								print(f"File copy generated an exception: {exc}")
 
 			if error_msg:
 				print(f" {error_msg}")
-				return False
+				sys.exit(1)
+				sys.exit(1)
 
-		return True
-
+		return self.exr_to_ffmpeg_pattern(outpath=output_path)
+	
 	def display_results(self, files, sequences):
 		"""Displays the identified files and sequences."""
 		print("Identified Files:")
@@ -660,46 +699,25 @@ class VFXFileProcessor():
 
 		print(f"JPEG created: {jpeg_path}")
 
-	def create_mov_from_exrs(exr_sequence_path, mov_path, fps=24, display_window=None, data_window=None, channels=None):
+	def create_mov_from_exrs(input_pattern, output_mov, fps=24):
 		"""
-		Creates a MOV video from a sequence of EXR images using Gaffer.
+		Create a .mov file from an image sequence using ffmpeg.
 
 		Args:
-			exr_sequence_path (str): The path to the EXR sequence (e.g., /path/to/image.%04d.exr).
-			mov_path (str): The path to save the MOV video.
-			fps (int, optional): Frames per second for the MOV video. Defaults to 24.
-			display_window (IECore.Box2i, optional): The display window to use.
-			data_window (IECore.Box2i, optional): The data window to use.
-			channels (list of str, optional): The channels to include in the MOV.
+			input_pattern (str): Input image sequence pattern, e.g. 'path/to/image.%04d.exr'
+			output_mov (str): Output .mov file path.
+			fps (int): Frames per second.
 		"""
-
-		script = Gaffer.ScriptNode()
-
-		# Read the EXR sequence
-		reader = GafferImage.ImageReader()
-		script["exrReader"] = reader
-		reader["fileName"].setValue(exr_sequence_path)
-
-		# Write the MOV video
-		writer = GafferImage.ImageWriter()
-		script["movWriter"] = writer
-		writer["fileName"].setValue(mov_path)
-		writer["in"].setInput(reader["out"])
-		writer["fileFormat"].setValue("MOV")
-		writer["fps"].setValue(fps)
-
-		# Apply display window, data window, and channels if provided
-		if display_window:
-			writer["displayWindow"].setValue(display_window)
-		if data_window:
-			writer["dataWindow"].setValue(data_window)
-		if channels:
-			writer["channels"].setValue(IECore.StringVectorData(channels))
-
-		# Execute the writer node
-		writer["task"].execute()
-
-		print(f"MOV created: {mov_path}")
+		print(f"Running: ffmpeg -y -framerate {fps} -i {input_pattern} -c:v prores_ks -pix_fmt yuv422p10le {output_mov}")
+		import ffmpeg
+        
+		(
+			ffmpeg.input(input_pattern, framerate=fps)
+			.output(output_mov, vcodec='prores_ks', pix_fmt='yuv422p10le')
+			.overwrite_output()
+			.run()
+		)
+    
 
 	def generate_proxy_from_exr_using_convert(input_path, output_path, format):
 		"""
@@ -747,6 +765,23 @@ class VFXFileProcessor():
 		except Exception as e:
 			print(f"An unexpected error occurred: {e}")
 
+	def exr_to_ffmpeg_pattern(self, outpath):
+		"""
+			Converts an EXR file path to an ffmpeg sequence pattern.
+			Example: ..._1001_f4448x3096.exr -> ..._%04d_f4448x3096.exr
+			Returns None if no frame number pattern is found.
+		"""
+		dir_name, file_name = os.path.split(outpath)
+		# Try to match a frame number pattern
+		match = re.search(r'_(\d{4})_', file_name) and not re.search(r'_(\d{4})(?=\.exr$)', file_name)
+		print (f"match : {match}")
+		if not match:
+			return None
+		# Replace the frame number (e.g., 1001) with %04d
+		pattern = re.sub(r'_(\d{4})_', r'_%04d_', file_name)
+		# If frame number is at the end before .exr, handle that too
+		pattern = re.sub(r'_(\d{4})(?=\.exr$)', r'_%04d', pattern)
+		return os.path.join(dir_name, pattern)
 
 def parse_arguments():
 	"""
@@ -791,7 +826,6 @@ def parse_arguments():
 		"--input_date",
 		type=str,
 		help="Date in YYYYMMDD format.",  # Changed format to be more standard
-		required=True  # Make this argument mandatory
 	)
 	parser.add_argument(
 		"--data_type",
