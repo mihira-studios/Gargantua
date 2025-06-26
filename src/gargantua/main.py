@@ -353,31 +353,30 @@ class VFXFileProcessor():
 						# Find scene_shot folders (e.g., 48_14)
 						sc_match = re.match(r"^SC_(\d+)", folder_name)
 						if sc_match:
-							self.data["scene"] = sc_match.group(1)
+							scene = sc_match.group(1)
+							self.data["scene"] = scene
+							status = self.readCSV(os.path.join(root, f"SC_{scene}"))
 						
 						scene_shot_match = re.match(rf"{self.data.get('scene')}_(\d+)", folder_name)
 
 						if scene_shot_match:
 							self.data["shot"] = scene_shot_match.group(1)
+							print (f"processing for shot : {self.data['shot']}")
 							scene_shot_path = os.path.join(root, folder_name)
-							
-							status = self.readCSV(scene_shot_path)
-							if status:
-								# Find resolution folders (e.g., 4448x3086) inside scene_shot folders
-								for sub_dir_name in os.listdir(scene_shot_path):
-									sub_dir_path = os.path.join(scene_shot_path, sub_dir_name)
-									if os.path.isdir(sub_dir_path): 
-										resolution_match = re.match(r"\d+x\d+", sub_dir_name)
-										if resolution_match:
-											self.data["resolution"] = resolution_match.group(0)
-											files, sequences = self.get_files_and_sequences(sub_dir_path)
-											seqeunce_path_pattern  = self.copy_files_to_structure(files, sequences)
-											
-											#print(f"pattern for mov : {seqeunce_path_pattern}")
-											#base_name, ext = os.path.basename(seqeunce_path_pattern).split('.')
-											#self.create_mov_from_exrs(seqeunce_path_pattern, os.path.join(scene_shot_path, f"{base_name}.mov"))
+                            # Find resolution folders (e.g., 4448x3086) inside scene_shot folders
+							for sub_dir_name in os.listdir(scene_shot_path):
+								sub_dir_path = os.path.join(scene_shot_path, sub_dir_name)
+								if os.path.isdir(sub_dir_path): 
+									resolution_match = re.match(r"\d+x\d+", sub_dir_name)
+									if resolution_match:
+										self.data["resolution"] = resolution_match.group(0)
+										files, sequences = self.get_files_and_sequences(sub_dir_path)
+										seqeunce_path_pattern  = self.copy_files_to_structure(files, sequences)
+										
+										#print(f"pattern for mov : {seqeunce_path_pattern}")
+										#base_name, ext = os.path.basename(seqeunce_path_pattern).split('.')
+										#self.create_mov_from_exrs(seqeunce_path_pattern, os.path.join(scene_shot_path, f"{base_name}.mov"))
 
-				
 			except Exception as e:
 				logging.error(f"An error occurred: {e}")
 	
@@ -391,6 +390,7 @@ class VFXFileProcessor():
 			# Create mapping where the first column is the key (no header)
 			first_column_mapping_no_header = reader_no_header.create_dictionary_mapping(skip_header=False)
 			for key, values in first_column_mapping_no_header.items():
+				print(f"read csv key {key}, values {values}")
 				self.data[key] = values
 		else:
 			print(f"No csv file found at {path}!")
@@ -486,7 +486,7 @@ class VFXFileProcessor():
 		"""Generates the output file path based on the specified naming convention."""
 		#parsed_info = self.parse_filename(base_name
 		for key in self.data.keys():
-			if self.data.get("scene") in key or self.data.get("shot") in key:
+			if self.data.get("shot") in key:
 				shot = self.data[key][0].split('_')[-1]
 				break
 
@@ -536,7 +536,7 @@ class VFXFileProcessor():
 		filename_placeholder = "{sceneshot}_{type}_{camera}_{take}_{frame_number}_f{resolution}{ext}"
  
 		for key in self.data.keys():
-			if self.data.get("scene") in key or self.data.get("shot") in key:
+			if self.data.get("shot") in key:
 				csv_data = self.data[key]
 				break
 
@@ -593,7 +593,6 @@ class VFXFileProcessor():
 		m_status = self.check_missing_frames(sequences)
 		mov_pattern = None
 
-		print(f"missing frames: {m_status}")
 		if m_status and self.data.get("force") == False:
 			return
 		elif not m_status or self.data.get("force") == True:
