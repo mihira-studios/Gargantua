@@ -336,7 +336,7 @@ class VFXFileProcessor():
 		"""
 		paths = self.data.get("source")
 		if not isinstance(paths, list):
-			return 
+			paths = [paths]
 		
 		for base_path in paths:
 			if not os.path.exists(base_path):
