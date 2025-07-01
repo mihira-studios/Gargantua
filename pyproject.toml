@@ -9,10 +9,12 @@ readme = "README.md"
 requires-python = ">=3.10"
 dependencies = [
     "imath (>=0.0.2,<0.0.3)",
-    "pandas (>=2.2.3,<3.0.0)"
+    "pandas (>=2.2.3,<3.0.0)",
+    "ffmpeg-python (>=0.2.0,<0.3.0)",
 ]
 
 [tool.poetry]
+readme = ["README.md"]
 packages = [
     {include = "gargantua", from = "src"},
 ]
